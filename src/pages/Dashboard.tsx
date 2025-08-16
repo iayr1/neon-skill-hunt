@@ -15,20 +15,20 @@ interface Profile {
   id: string;
   full_name: string;
   headline: string;
-  avatar_url: string;
-  location: string;
+  avatar_url: string | null;
+  location: string | null;
 }
 
 interface Post {
   id: string;
   content: string;
-  image_url: string;
+  image_url: string | null;
   likes_count: number;
   comments_count: number;
   shares_count: number;
   created_at: string;
   author_id: string;
-  profiles: Profile;
+  profiles: Profile; // embedded author profile
 }
 
 const Dashboard = () => {
@@ -48,14 +48,25 @@ const Dashboard = () => {
 
   const fetchProfile = async () => {
     try {
+      if (!user?.id) return;
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('user_id', user?.id)
+        .eq('user_id', user.id)
         .single();
 
       if (error) throw error;
-      setProfile(data);
+
+      // Normalize to match Profile interface
+      const normalized: Profile = {
+        id: data.id,
+        full_name: data.full_name ?? '',
+        headline: data.headline ?? '',
+        avatar_url: data.avatar_url ?? null,
+        location: data.location ?? null,
+      };
+
+      setProfile(normalized);
     } catch (error) {
       console.error('Error fetching profile:', error);
     }
@@ -63,17 +74,32 @@ const Dashboard = () => {
 
   const fetchPosts = async () => {
     try {
+      // IMPORTANT: Use alias join syntax profiles:author_id(...)
+      // This returns a field "profiles" containing the related profile,
+      // where profiles.id = posts.author_id.
       const { data, error } = await supabase
         .from('posts')
         .select(`
-          *,
-          profiles!inner(id, full_name, headline, avatar_url, location)
+          id, content, image_url, likes_count, comments_count, shares_count, created_at, author_id,
+          profiles:author_id ( id, full_name, headline, avatar_url, location )
         `)
         .order('created_at', { ascending: false })
         .limit(10);
 
       if (error) throw error;
-      setPosts(data || []);
+
+      // Defensive narrowing: ensure each row has an embedded profiles object
+      const sanitized = (data ?? []).filter(
+        (row: any) =>
+          row &&
+          row.id &&
+          row.profiles &&
+          typeof row.profiles === 'object' &&
+          row.profiles.id &&
+          typeof row.profiles.full_name === 'string'
+      ) as Post[];
+
+      setPosts(sanitized);
     } catch (error) {
       console.error('Error fetching posts:', error);
     }
@@ -81,7 +107,6 @@ const Dashboard = () => {
 
   const handleCreatePost = async () => {
     if (!newPost.trim() || !user) return;
-
     setIsPosting(true);
     try {
       const { error } = await supabase
@@ -96,14 +121,14 @@ const Dashboard = () => {
       setNewPost('');
       fetchPosts();
       toast({
-        title: "Post created!",
-        description: "Your post has been shared with your network.",
+        title: 'Post created!',
+        description: 'Your post has been shared with your network.',
       });
     } catch (error: any) {
       toast({
-        title: "Error creating post",
+        title: 'Error creating post',
         description: error.message,
-        variant: "destructive",
+        variant: 'destructive',
       });
     } finally {
       setIsPosting(false);
@@ -112,7 +137,6 @@ const Dashboard = () => {
 
   const handleLikePost = async (postId: string) => {
     if (!user) return;
-
     try {
       // Check if user already liked the post
       const { data: existingLike } = await supabase
@@ -120,7 +144,7 @@ const Dashboard = () => {
         .select('id')
         .eq('post_id', postId)
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle(); // tolerate no row without throwing
 
       if (existingLike) {
         // Unlike the post
@@ -130,7 +154,7 @@ const Dashboard = () => {
           .eq('post_id', postId)
           .eq('user_id', user.id);
 
-        // Update likes count
+        // Update likes count via RPC (ensure these functions exist in DB)
         await supabase.rpc('decrement_likes_count', { post_id: postId });
       } else {
         // Like the post
@@ -141,7 +165,7 @@ const Dashboard = () => {
             user_id: user.id,
           });
 
-        // Update likes count
+        // Update likes count via RPC
         await supabase.rpc('increment_likes_count', { post_id: postId });
       }
 
@@ -173,7 +197,7 @@ const Dashboard = () => {
               <CardContent className="p-6">
                 <div className="text-center">
                   <Avatar className="h-16 w-16 mx-auto mb-4 border-2 border-primary/20">
-                    <AvatarImage src={profile?.avatar_url} />
+                    <AvatarImage src={profile?.avatar_url ?? undefined} />
                     <AvatarFallback className="bg-gradient-primary text-primary-foreground">
                       {profile?.full_name?.charAt(0) || user.email?.charAt(0)?.toUpperCase()}
                     </AvatarFallback>
@@ -186,7 +210,7 @@ const Dashboard = () => {
                     <p className="text-sm text-muted-foreground">{profile.location}</p>
                   )}
                 </div>
-                
+
                 <div className="mt-6 space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Profile views</span>
@@ -197,7 +221,6 @@ const Dashboard = () => {
                     <span className="font-medium">0</span>
                   </div>
                 </div>
-
                 <Button variant="outline" className="w-full mt-4" size="sm">
                   View Profile
                 </Button>
@@ -212,7 +235,7 @@ const Dashboard = () => {
               <CardContent className="p-6">
                 <div className="flex items-start space-x-4">
                   <Avatar className="h-10 w-10 border border-primary/20">
-                    <AvatarImage src={profile?.avatar_url} />
+                    <AvatarImage src={profile?.avatar_url ?? undefined} />
                     <AvatarFallback className="bg-gradient-primary text-primary-foreground">
                       {profile?.full_name?.charAt(0) || user.email?.charAt(0)?.toUpperCase()}
                     </AvatarFallback>
@@ -231,8 +254,8 @@ const Dashboard = () => {
                           Photo
                         </Button>
                       </div>
-                      <Button 
-                        onClick={handleCreatePost} 
+                      <Button
+                        onClick={handleCreatePost}
                         disabled={!newPost.trim() || isPosting}
                         size="sm"
                       >
@@ -252,7 +275,7 @@ const Dashboard = () => {
                   <CardContent className="p-6">
                     <div className="flex items-start space-x-4">
                       <Avatar className="h-12 w-12 border border-primary/20">
-                        <AvatarImage src={post.profiles.avatar_url} />
+                        <AvatarImage src={post.profiles.avatar_url ?? undefined} />
                         <AvatarFallback className="bg-gradient-primary text-primary-foreground">
                           {post.profiles.full_name?.charAt(0)}
                         </AvatarFallback>
@@ -271,11 +294,11 @@ const Dashboard = () => {
                         <div className="mt-3">
                           <p className="text-foreground whitespace-pre-wrap">{post.content}</p>
                         </div>
-                        
+
                         {post.image_url && (
                           <div className="mt-4">
-                            <img 
-                              src={post.image_url} 
+                            <img
+                              src={post.image_url}
                               alt="Post content"
                               className="rounded-lg max-h-96 w-full object-cover"
                             />
