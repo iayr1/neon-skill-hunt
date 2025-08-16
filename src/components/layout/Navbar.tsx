@@ -2,6 +2,33 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Search, Menu, User, Bell, Briefcase } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+
+const AuthButtons = () => {
+  const { user, signOut } = useAuth();
+
+  if (user) {
+    return (
+      <div className="hidden md:flex items-center space-x-2">
+        <Link to="/dashboard">
+          <Button variant="ghost">Dashboard</Button>
+        </Link>
+        <Button variant="ghost" onClick={signOut}>Sign Out</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="hidden md:flex items-center space-x-2">
+      <Link to="/auth">
+        <Button variant="ghost">Sign In</Button>
+      </Link>
+      <Link to="/auth">
+        <Button variant="neon">Get Started</Button>
+      </Link>
+    </div>
+  );
+};
 
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -58,10 +85,7 @@ const Navbar = () => {
             </Button>
 
             {/* Auth Buttons */}
-            <div className="hidden md:flex items-center space-x-2">
-              <Button variant="ghost">Sign In</Button>
-              <Button variant="neon">Get Started</Button>
-            </div>
+            <AuthButtons />
 
             {/* Mobile Menu Toggle */}
             <Button
@@ -92,8 +116,7 @@ const Navbar = () => {
                 Insights
               </Link>
               <div className="flex flex-col space-y-2 pt-4">
-                <Button variant="ghost">Sign In</Button>
-                <Button variant="neon">Get Started</Button>
+                <AuthButtons />
               </div>
             </div>
           </div>
